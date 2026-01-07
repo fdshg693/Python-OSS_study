@@ -1,5 +1,5 @@
 ---
-title: "Agent Frameworkで始めるAzure OpenAI連携 - たった5行で動くチャットボットの裏側を理解する"
+title: "Agent Frameworkで始めるAzure OpenAI連携 - たった10数行で動くチャットボットの裏側を理解する"
 emoji: "🤖"
 type: "tech"
 topics: ["Python", "AzureOpenAI", "AgentFramework", "ChatBot"]
@@ -8,7 +8,7 @@ published: false
 
 # はじめに
 
-Agent FrameworkはMicrosoftが開発したPythonライブラリで、AIエージェントを簡単に構築できるフレームワークです。この記事では、わずか5行のコードで動作するAzure OpenAIチャットボットを題材に、その裏側で何が起きているのかを段階的に深掘りしていきます。
+Agent FrameworkはMicrosoftが開発したPythonライブラリで、AIエージェントを簡単に構築できるフレームワークです。この記事では、わずか10数行のコードで動作するAzure OpenAIチャットボットを題材に、その裏側で何が起きているのかを段階的に深掘りしていきます。
 
 「動かせるけど仕組みが分からない」という初心者の方にこそ読んでいただきたい内容です。実際に動くコードから始めて、徐々に内部実装を理解していく構成になっています。
 
@@ -54,7 +54,7 @@ Assistant: 2
 このコードを動かすには、`.env`ファイルに以下の設定が必要です：
 
 ```env
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=gpt-4o
 AZURE_OPENAI_API_KEY=your-api-key-here
 ```
@@ -137,7 +137,7 @@ Agent Frameworkでは、以下の優先順位で設定値が決定されます�
 
 `AzureOpenAIChatClient`の`__init__`メソッドは、`env_file_path`を`AzureOpenAISettings`にそのまま渡します。
 
-[azure\_chat_client.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_chat_client.py
+[agent-framework/azure/_chat_client.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_chat_client.py)
 ```python
 # 簡略化版
 class AzureOpenAIChatClient(AzureOpenAIConfigMixin, OpenAIBaseChatClient):
@@ -153,7 +153,7 @@ class AzureOpenAIChatClient(AzureOpenAIConfigMixin, OpenAIBaseChatClient):
 
 ここがポイントです。`AFBaseSettings`は`__new__`メソッドをオーバーライドしており、インスタンス生成前に`model_config`の`env_file`に`env_file_path`の値を設定します：
 
-[azure\_pydantic.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/_pydantic.py
+[agent-framework/azure/_pydantic.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_pydantic.py)
 ```python
 # 簡略化版
 class AFBaseSettings(BaseSettings):
@@ -187,7 +187,7 @@ Pythonでは、オブジェクトの生成は2段階で行われます：
 
 ### プロセス3: Pydantic BaseSettingsでの設定読み込み
 
-最終的に、Pydantic の`BaseSettings`（[pydantic_settings\main.py]https://github.com/pydantic/pydantic-settings/blob/main/pydantic_settings/main.py）が`model_config`の`env_file`設定を参照し、指定されたファイルから設定値を読み込みます。
+最終的に、Pydantic の`BaseSettings`（[pydantic_settings/main.py](https://github.com/pydantic/pydantic-settings/blob/main/pydantic_settings/main.py)）が`model_config`の`env_file`設定を参照し、指定されたファイルから設定値を読み込みます。
 
 この処理は`_settings_build_values`メソッド内で行われ、ファイルから読み込まれた値がインスタンスのプロパティとして設定されます。
 
@@ -207,7 +207,7 @@ Pythonでは、オブジェクトの生成は2段階で行われます：
 
 ## 設定値のマッピング
 
-`AzureOpenAISettings`（調査ファイル：[azure\_shared.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_shared.py）では、`env_prefix`に`AZURE_OPENAI_`が設定されています。
+`AzureOpenAISettings`（調査ファイル：[agent-framework/azure/_shared.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_shared.py)）では、`env_prefix`に`AZURE_OPENAI_`が設定されています。
 
 また、親クラスの`AFBaseSettings`で`model_config`に`case_sensitive=False`が設定されているため、`.env`ファイルの項目は以下のように自動的にマッピングされます：
 
@@ -242,7 +242,7 @@ AzureOpenAIChatClient
 
 前述の通り、`.env`ファイルから必要な設定（endpoint、api_key、deployment_nameなど）が読み込まれ、`azure_openai_settings`インスタンスのプロパティとして格納されます。
 
-[azure\_chat_client.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_chat_client.py
+[agent-framework/azure/_chat_client.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_chat_client.py)
 ```python
 # 簡略化版
 class AzureOpenAIChatClient(AzureOpenAIConfigMixin, OpenAIBaseChatClient):
@@ -266,7 +266,7 @@ class AzureOpenAIChatClient(AzureOpenAIConfigMixin, OpenAIBaseChatClient):
 
 `AzureOpenAIChatClient`は`AzureOpenAIConfigMixin`を継承しています。この`Mixin`（ミックスイン：複数のクラスに共通の機能を提供するクラス）の`__init__`メソッドで、Azure OpenAI用のクライアントが生成されます：
 
-[azure\_shared.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_shared.py
+[agent-framework/azure/_shared.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_shared.py)
 ```python
 # 簡略化版
 class AzureOpenAIConfigMixin(OpenAIBase):
@@ -294,7 +294,7 @@ class AzureOpenAIConfigMixin(OpenAIBase):
 
 さらに`super().__init__(client=client)`によって、`OpenAIBase`クラスの初期化が呼び出されます：
 
-[azure\openai\_shared.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/openai\_shared.py
+[agent-framework/azure/openai/_shared.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/openai/_shared.py)
 ```python
 # 簡略化版
 class OpenAIBase(SerializationMixin):
@@ -349,7 +349,7 @@ response = await client.get_response([msg1, msg2])  # list[ChatMessage]
 
 `AzureOpenAIChatClient`は`get_response`メソッドを定義していません。そのため、親クラスの`BaseChatClient`のメソッドが呼び出されます。
 
-[azure\_clients.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/_clients.py
+[agent-framework/azure/_clients.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_clients.py)
 ```python
 # 簡略化版
 class BaseChatClient(SerializationMixin, ABC):
@@ -404,7 +404,7 @@ class BaseChatClient(SerializationMixin, ABC):
 
 `OpenAIBaseChatClient`の`_inner_get_response`で、実際のAPI呼び出しが行われます：
 
-[azure\openai\_chat_client.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/openai\_chat_client.py
+[agent-framework/azure/openai/_chat_client.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/openai/_chat_client.py)
 ```python
 # 簡略化版
 # 一部分かりやすさのため、変更（completionという中間変数は本来なら存在しないが、ここでは説明のために使用）
@@ -533,7 +533,7 @@ Pydanticを基盤とすることで、以下のメリットを享受していま
 
 # まとめ
 
-この記事では、わずか5行のコードから始めて、Agent Frameworkの内部実装を深掘りしてきました。
+この記事では、わずか10数行のコードから始めて、Agent Frameworkの内部実装を深掘りしてきました。
 
 ## 学んだこと
 
@@ -544,7 +544,7 @@ Pydanticを基盤とすることで、以下のメリットを享受していま
 
 ## シンプルなAPIの裏側
 
-たった5行のコードの裏側では、以下のような処理が動いていました：
+たった10数行のコードの裏側では、以下のような処理が動いていました：
 
 - 設定ファイルのパース
 - 環境変数とのマッピング
@@ -559,13 +559,13 @@ Pydanticを基盤とすることで、以下のメリットを享受していま
 
 ### 調査で参照したファイル
 
-- [azure\_chat_client.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_chat_client.py
-- [azure\_shared.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_shared.py
-- [azure\_pydantic.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/_pydantic.py
-- [azure\_clients.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/_clients.py
-- [azure\openai\_chat_client.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/openai\_chat_client.py
-- [azure\openai\_shared.py]https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/openai\_shared.py
-- [pydantic_settings\main.py]https://github.com/pydantic/pydantic-settings/blob/main/pydantic_settings/main.py
+- [agent-framework/azure/_chat_client.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_chat_client.py)
+- [agent-framework/azure/_shared.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_shared.py)
+- [agent-framework/azure/_pydantic.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_pydantic.py)
+- [agent-framework/azure/_clients.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/azure/_clients.py)
+- [agent-framework/azure/openai/_chat_client.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/openai/_chat_client.py)
+- [agent-framework/azure/openai/_shared.py](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/openai/_shared.py)
+- [pydantic_settings/main.py](https://github.com/pydantic/pydantic-settings/blob/main/pydantic_settings/main.py)
 
 ### 公式ドキュメント
 
