@@ -1,0 +1,28 @@
+# Rich Copilot Guide
+- Core architecture: `Console` drives rendering via `__rich__` / `__rich_console__(Console, ConsoleOptions)` contracts; respect width/height, `legacy_windows`, `ascii_only`, and options flow in [rich/console.py](../../rich/console.py).
+- Renderables live in [rich/](../../rich/); reuse existing ones (Text, Table, Panel, Markdown, Syntax, Traceback) before inventing new types; prefer `ConsoleRenderable` / `Segment` outputs.
+- Live + progress: `Live` wraps any renderable with background refresh and alt-screen support; see [rich/live.py](../../rich/live.py). `Progress` builds a table of `ProgressColumn` renderables with auto-refresh and task tracking in [rich/progress.py](../../rich/progress.py).
+- Logging: `RichHandler` formats stdlib logging with columns, highlighting, optional rich tracebacks; see [rich/logging.py](../../rich/logging.py). Avoid enabling markup for untrusted log sources.
+- Key dirs: runtime [rich/](../../rich/); tests [tests/](../../tests/); examples [examples/](../../examples/); docs sources [docs/source](../../docs/source); benchmarks [benchmarks/](../../benchmarks/); assets [assets/](../../assets/) and screenshots [imgs/](../../imgs/).
+- Build/test: [Makefile](../../Makefile) has `make test`, `make test-no-cov`, `make format[-check]` (black), `make typecheck[-report]` (mypy), `make docs` (Sphinx HTML).
+- tox: [tox.ini](../../tox.ini) defines py{38-313}, `lint` (runs make format-check + typecheck), and `docs`; installs via poetry before pytest.
+- Benchmarks: [asv.conf.json](../../asv.conf.json) + [benchmarks/benchmarks.py](../../benchmarks/benchmarks.py); run `asv run` / `asv publish` against a built wheel.
+- Console protocol: honor `ConsoleOptions` when implementing renderables; avoid hard-coded widths; use `render_scope` / `measure_renderables` helpers for sizing.
+- Styles/colors: prefer `StyleType`, markup helpers, and palettes in [rich/style.py](../../rich/style.py) + [rich/default_styles.py](../../rich/default_styles.py); avoid manual ANSI; consider `ColorSystem` detection and `Theme` overrides.
+- Controls: use `Control` objects for cursor/show/hide and alt-screen changes rather than raw escape codes; see [rich/control.py](../../rich/control.py).
+- Progress columns: subclass `ProgressColumn`, set `max_refresh` when heavy, and rely on cached renderables per task (throttled in [rich/progress.py](../../rich/progress.py)). Keep column state thread-safe when used with background refresh.
+- Progress usage: `with Progress(...) as progress: task = progress.add_task("name", total=...); progress.update(task, advance=...)`; for simple loops use `track(iterable, total=...)` ([rich/progress.py](../../rich/progress.py)).
+- Live usage: `with Live(renderable, refresh_per_second=4, transient=True) as live: live.update(new_renderable, refresh=True)`; `_RefreshThread` runs when `auto_refresh` is True—always stop threads on exit.
+- Logging usage: `logging.basicConfig(handlers=[RichHandler(rich_tracebacks=True)], level=logging.INFO)`; `record.markup` / `record.highlighter` override behavior.
+- Windows: detect VT/truecolor via `get_windows_console_features()` before emitting VT codes; legacy consoles use `_windows_renderer` for cursor moves ([rich/_windows.py](../../rich/_windows.py), [rich/_windows_renderer.py](../../rich/_windows_renderer.py)).
+- Emoji/spinners: use registry data in [rich/_emoji_codes.py](../../rich/_emoji_codes.py) and [rich/_spinners.py](../../rich/_spinners.py); prefer `EmojiVariant`/`Spinner` APIs over raw glyphs so fallback works.
+- File/reader helpers: use `Progress.open` / `_Reader` when wrapping file IO so progress advances by bytes; supports text/binary and transient display.
+- Testing: pytest focused; autouse fixture clears color env vars [tests/conftest.py](../../tests/conftest.py). Keep deterministic widths (`Console(record=True, width=... )`) and set `TERM=unknown` like Makefile.
+- Platform-sensitive tests: gate expectations with `sys.platform` and `Console.is_windows`; assert color system/emoji availability accordingly.
+- Docs: build with `make docs` or `tox -e docs`; update API refs and include runnable examples from [examples/](../../examples/).
+- API primers: printing via `Console().print("Hello", style="bold red")`; markup allowed on strings, or use `Text.from_markup`.
+- Progress API: `Progress(...)` accepts columns like `BarColumn`, `TimeRemainingColumn`, custom `ProgressColumn` with `max_refresh` for expensive rendering.
+- Live + Group: combine multiple renderables with `Group` when updating live displays to avoid flicker; see [rich/live.py](../../rich/live.py).
+- Logging link paths: `enable_link_path` adds clickable file links; ensure width calculation handles long paths; supply `tracebacks_*` options for constrained consoles.
+- Compatibility: keep emoji/truecolor optional; fall back to ASCII or 16-color on classic Windows terminals; validate behavior under Jupyter (`Console.is_jupyter`).
+- Release hygiene: maintain typing (`from __future__ import annotations`), keep public APIs backward compatible, and document user-facing changes in README/docs.

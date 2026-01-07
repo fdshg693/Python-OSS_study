@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "windows-mcp-custom": {
+      "command": "uv",
+      "args": [
+        "run",        
+        "--project", "path/to/your/project",
+        "--with", "fastmcp",
+        "fastmcp",
+        "run",
+        "path/to/your/project/main.py"
+      ]
+    }
+  }
+}
