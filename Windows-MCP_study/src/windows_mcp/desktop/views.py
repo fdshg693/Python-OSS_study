@@ -1,16 +1,15 @@
-from src.tree.views import TreeState
+from windows_mcp.tree.views import TreeState
 from dataclasses import dataclass
 from tabulate import tabulate
 from typing import Optional
 from PIL.Image import Image
 from enum import Enum
 
-class Browser(Enum):
-    CHROME='Chrome'
-    EDGE='Edge'
-    FIREFOX='Firefox'
-
 class Status(Enum):
+    """
+    アプリのWindowの状態
+    最大化、最小化、通常、非表示
+    """
     MAXIMIZED='Maximized'
     MINIMIZED='Minimized'
     NORMAL='Normal'
@@ -26,11 +25,17 @@ class App:
     handle: int
     process_id:int
     
-    def to_row(self):
+    def to_row(self) -> list[str]:
+        """
+        アプリのWindowの情報をリストとして返す
+        """
         return [self.name, self.depth, self.status.value, self.size.width, self.size.height, self.handle]
 
 @dataclass
 class Size:
+    """
+    アプリのWindowのサイズ
+    """
     width:int
     height:int
 
@@ -39,6 +44,9 @@ class Size:
 
 @dataclass
 class DesktopState:
+    """
+    デスクトップの状態
+    """
     apps:list[App]
     active_app:Optional[App]
     screenshot:Image|None

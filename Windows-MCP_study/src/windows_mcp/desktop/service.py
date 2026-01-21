@@ -1,10 +1,10 @@
-from src.desktop.config import BROWSER_NAMES, PROCESS_PER_MONITOR_DPI_AWARE
-from src.desktop.views import DesktopState, App, Size, Status
+from windows_mcp.desktop.config import BROWSER_NAMES, PROCESS_PER_MONITOR_DPI_AWARE
+from windows_mcp.desktop.views import DesktopState, App, Size, Status
 from locale import getpreferredencoding
 from contextlib import contextmanager
 from typing import Optional, Literal
 from markdownify import markdownify
-from src.tree.service import Tree
+from windows_mcp.tree.service import Tree
 from fuzzywuzzy import process
 from psutil import Process
 from time import sleep
@@ -43,11 +43,15 @@ pg.PAUSE = 1.0
 
 class Desktop:
     def __init__(self):
+        # システム設定からユーザの使用コード(utf-8など)を推測して取得
         self.encoding = getpreferredencoding()
         self.tree = Tree(self)
         self.desktop_state = None
 
     def get_resolution(self) -> tuple[int, int]:
+        """
+        画面のサイズを返す
+        """
         return pg.size()
 
     def get_state(
@@ -89,6 +93,10 @@ class Desktop:
         return None
 
     def get_active_app(self) -> App | None:
+        """
+        現在アクティブなアプリのWindowの情報を返す
+        最前面のアプリから、現在アクティブなアプリを判断する
+        """
         try:
             handle = uia.GetForegroundWindow()
             for app in self.get_apps():
@@ -100,6 +108,9 @@ class Desktop:
         return None
 
     def get_app_status(self, control: uia.Control) -> Status:
+        """
+        アプリのWindowのサイズの状態を返す
+        """
         if uia.IsIconic(control.NativeWindowHandle):
             return Status.MINIMIZED
         elif uia.IsZoomed(control.NativeWindowHandle):
@@ -110,19 +121,32 @@ class Desktop:
             return Status.HIDDEN
 
     def get_cursor_location(self) -> tuple[int, int]:
+        """
+        マウスカーソルの位置を返す
+        """
         position = pg.position()
         return (position.x, position.y)
 
     def get_element_under_cursor(self) -> uia.Control:
+        """
+        マウスカーソルの下にある要素を返す
+        """
         return uia.ControlFromCursor()
 
     def get_apps_from_start_menu(self) -> dict[str, str]:
+        """
+        Windowsのスタートメニューに登録されているアプリの一覧を取得する
+        アプリの名前をキー、AppIDをバリューとする辞書を返す
+        """
         command = "Get-StartApps | ConvertTo-Csv -NoTypeInformation"
         apps_info, _ = self.execute_command(command)
         reader = csv.DictReader(io.StringIO(apps_info))
         return {row.get("Name").lower(): row.get("AppID") for row in reader}
 
     def execute_command(self, command: str) -> tuple[str, int]:
+        """
+        PowerShellコマンドを実行する
+        """
         try:
             encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
             result = subprocess.run(
@@ -140,11 +164,17 @@ class Desktop:
         except Exception:
             return ("Command execution failed", 1)
 
-    def is_app_browser(self, node: uia.Control):
+    def is_app_browser(self, node: uia.Control) -> bool:
+        """
+        アプリがブラウザかどうかを判定する
+        """
         process = Process(node.ProcessId)
         return process.name() in BROWSER_NAMES
 
     def get_default_language(self) -> str:
+        """
+        システムのデフォルト言語を取得する
+        """
         command = "Get-Culture | Select-Object Name,DisplayName | ConvertTo-Csv -NoTypeInformation"
         response, _ = self.execute_command(command)
         reader = csv.DictReader(io.StringIO(response))
@@ -153,6 +183,10 @@ class Desktop:
     def resize_app(
         self, size: tuple[int, int] = None, loc: tuple[int, int] = None
     ) -> tuple[str, int]:
+        """
+        アクティブなアプリのサイズを変更する
+        ただし、最小化、最大化、非表示の場合は変更しない
+        """
         active_app = self.desktop_state.active_app
         if active_app is None:
             return "No active app found", 1
@@ -176,6 +210,10 @@ class Desktop:
             return (f"{active_app.name} resized to {width}x{height} at {x},{y}.", 0)
 
     def is_app_running(self, name: str) -> bool:
+        """
+        アプリが起動しているかどうかを判定する
+        ただしアプリ名を元に類似度を計算して判定するため、正しくない場合も考えられる
+        """
         apps = {app.name: app for app in self.get_apps()}
         return process.extractOne(name, list(apps.keys()), score_cutoff=60) is not None
 
@@ -213,6 +251,9 @@ class Desktop:
                     return response
 
     def launch_app(self, name: str) -> tuple[str, int]:
+        """
+        アプリを起動する
+        """
         apps_map = self.get_apps_from_start_menu()
         matched_app = process.extractOne(name, apps_map.keys(), score_cutoff=70)
         if matched_app is None:
@@ -224,6 +265,8 @@ class Desktop:
         if name.endswith(".exe"):
             response, status = self.execute_command(f"Start-Process {appid}")
         else:
+            # Windowsには「シェルフォルダ」という特殊な場所があり、
+            # shell:AppsFolder はインストールされているすべてのアプリ（UWPアプリやショートカット）が集まった仮想フォルダを指します。
             response, status = self.execute_command(
                 f"Start-Process shell:AppsFolder\\{appid}"
             )
@@ -290,6 +333,15 @@ class Desktop:
         clear: Literal["true", "false"] = "false",
         press_enter: Literal["true", "false"] = "false",
     ):
+        """
+        カーソルを移動してテキストを入力する
+        Args:
+            loc: カーソルを移動する座標
+            text: 入力するテキスト
+            caret_position: カーソルの位置
+            clear: 入力前にテキストをクリアするかどうか
+            press_enter: 入力後にEnterを押すかどうか
+        """
         x, y = loc
         pg.leftClick(x, y)
         if caret_position == "start":
@@ -313,6 +365,14 @@ class Desktop:
         direction: Literal["up", "down", "left", "right"] = "down",
         wheel_times: int = 1,
     ) -> str | None:
+        """
+        スクロールする
+        Args:
+            loc: スクロールする座標
+            type: スクロールの種類
+            direction: スクロールの方向
+            wheel_times: スクロールの回数
+        """
         if loc:
             self.move(loc)
         match type:
@@ -350,10 +410,20 @@ class Desktop:
         pg.dragTo(x, y, duration=0.6)
 
     def move(self, loc: tuple[int, int]):
+        """
+        カーソルを移動する
+        Args:
+            loc: 移動する座標
+        """
         x, y = loc
         pg.moveTo(x, y, duration=0.1)
 
     def shortcut(self, shortcut: str):
+        """
+        ショートカットキーを押す
+        Args:
+            shortcut: ショートカットキー
+        """
         shortcut = shortcut.split("+")
         if len(shortcut) > 1:
             pg.hotkey(*shortcut)

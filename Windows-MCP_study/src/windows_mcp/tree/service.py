@@ -1,4 +1,4 @@
-from src.tree.config import (
+from windows_mcp.tree.config import (
     INTERACTIVE_CONTROL_TYPE_NAMES,
     DOCUMENT_CONTROL_TYPE_NAMES,
     INFORMATIVE_CONTROL_TYPE_NAMES,
@@ -14,7 +14,7 @@ from uiautomation import (
     GetRootControl,
     PatternId,
 )
-from src.tree.views import (
+from windows_mcp.tree.views import (
     TreeElementNode,
     ScrollElementNode,
     Center,
@@ -22,9 +22,9 @@ from src.tree.views import (
     TreeState,
 )
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from src.tree.utils import random_point_within_bounding_box
+from windows_mcp.tree.utils import random_point_within_bounding_box
 from PIL import Image, ImageFont, ImageDraw
-from src.desktop.views import App
+from windows_mcp.desktop.views import App
 from typing import TYPE_CHECKING
 from time import sleep
 import logging
@@ -38,7 +38,7 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 if TYPE_CHECKING:
-    from src.desktop.service import Desktop
+    from windows_mcp.desktop.service import Desktop
 
 
 class Tree:
@@ -148,9 +148,30 @@ class Tree:
     def get_nodes(
         self, node: Control, is_browser: bool = False
     ) -> tuple[list[TreeElementNode], list[ScrollElementNode]]:
+        """
+        指定されたアプリケーションウィンドウ（node）内のUI要素ツリーを走査し、
+        操作可能な要素（interactive_nodes）とスクロール可能な要素（scrollable_nodes）を抽出します。
+        
+        Args:
+            node: 対象のアプリケーションのルートコントロール (UIAutomationのControl)
+            is_browser: 対象がブラウザかどうか (ブラウザの場合はDOMツリーとして特別な処理が必要なため)
+        """
         window_bounding_box = node.BoundingRectangle
 
+        # --- 内部ヘルパー関数: 各種判定ロジック ---
+
         def is_element_visible(node: Control, threshold: int = 0):
+            """
+            要素が視覚的に認識可能か判定します。
+            
+            判定基準:
+            1. BoundingRectangle（境界矩形）が空でないこと
+            2. 面積が閾値(threshold)より大きいこと
+            3. "IsOffscreen" プロパティが False（画面内にある）であること
+               ただし、"EditControl"（入力欄）の場合は、システム上でオフスクリーン扱いでも
+               操作対象とみなす場合があるため例外としてTrue扱いにしています。
+            4. コントロール要素であること
+            """
             is_control = node.IsControlElement
             box = node.BoundingRectangle
             if box.isempty():
@@ -158,18 +179,26 @@ class Tree:
             width = box.width()
             height = box.height()
             area = width * height
+            # node.IsOffscreen が False ならば画面内。
+            # EditControlは例外的に許可
             is_offscreen = (not node.IsOffscreen) or node.ControlTypeName in [
                 "EditControl"
             ]
             return area > threshold and is_offscreen and is_control
 
         def is_element_enabled(node: Control):
+            """要素が有効（IsEnabled）か判定します。無効なボタンなどを除外するために使用します。"""
             try:
                 return node.IsEnabled
             except Exception:
                 return False
 
         def is_default_action(node: Control):
+            """
+            要素がデフォルトのアクション（操作）を持っているか判定します。
+            例: 'invoke'（押下）、'expand'（展開）など。
+            これにより、単なるテキスト表示ではなく、何かアクションを起こせる要素かを見分けます。
+            """
             legacy_pattern = node.GetLegacyIAccessiblePattern()
             default_action = legacy_pattern.DefaultAction.title()
             if default_action in DEFAULT_ACTIONS:
@@ -177,6 +206,10 @@ class Tree:
             return False
 
         def is_element_image(node: Control):
+            """
+            画像要素かどうかを判定します。
+            単なる装飾的な画像（graphic）や、フォーカスできない画像は操作対象から除外するために使われます。
+            """
             if isinstance(node, ImageControl):
                 if (
                     node.LocalizedControlType == "graphic"
@@ -186,6 +219,11 @@ class Tree:
             return False
 
         def is_element_text(node: Control):
+            """
+            テキスト情報を持つ要素かどうかを判定します。
+            INFORMATIVE_CONTROL_TYPE_NAMES に含まれる要素（TextControlなど）で、
+            可視・有効・画像でないものを対象とします。
+            """
             try:
                 if node.ControlTypeName in INFORMATIVE_CONTROL_TYPE_NAMES:
                     if (
@@ -199,6 +237,7 @@ class Tree:
             return False
 
         def is_window_modal(node: WindowControl):
+            """ウィンドウがモーダル（親ウィンドウをブロックするタイプ）かどうかを判定します。"""
             try:
                 window_pattern = node.GetWindowPattern()
                 return window_pattern.IsModal
@@ -206,6 +245,12 @@ class Tree:
                 return False
 
         def is_keyboard_focusable(node: Control):
+            """
+            キーボードフォーカスを受け取れるか判定します。
+            特定のコントロールタイプ（入力欄、ボタン、チェックボックスなど）は
+            無条件でフォーカス可能とみなすホワイトリスト処理が含まれています。
+            それ以外は IsKeyboardFocusable プロパティを確認します。
+            """
             try:
                 if node.ControlTypeName in set(
                     [
@@ -224,6 +269,10 @@ class Tree:
         def element_has_child_element(
             node: Control, control_type: str, child_control_type: str
         ):
+            """
+            指定されたコントロールタイプの子要素を持っているか確認します。
+            DOM構造の補正（dom_correction）で使用されます。
+            """
             if node.LocalizedControlType == control_type:
                 first_child = node.GetFirstChildControl()
                 if first_child is None:
@@ -231,6 +280,7 @@ class Tree:
                 return first_child.LocalizedControlType == child_control_type
 
         def group_has_no_name(node: Control):
+            """名前（ラベル）のないグループコントロールか判定します。"""
             try:
                 if node.ControlTypeName == "GroupControl":
                     if not node.Name.strip():
@@ -240,6 +290,11 @@ class Tree:
                 return False
 
         def is_element_scrollable(node: Control):
+            """
+            要素がスクロール可能か判定します。
+            1. リストやドキュメントなどの特定のコンテナタイプでない、あるいはオフスクリーンの場合は除外
+            2. ScrollPattern を取得し、VerticallyScrollable（垂直スクロール可能）かチェック
+            """
             try:
                 if (
                     node.ControlTypeName
@@ -254,7 +309,12 @@ class Tree:
                 return False
 
         def is_element_interactive(node: Control):
+            """
+            要素が対話可能（クリックや入力が可能）な「インタラクティブ要素」かどうかを判定します。
+            アプリの種類（ブラウザか否か）やコントロールタイプによって判定ロジックが分岐します。
+            """
             try:
+                # ブラウザ内のデータ項目やリスト項目で、キーボードフォーカスできないものは除外
                 if (
                     is_browser
                     and node.ControlTypeName
@@ -262,12 +322,14 @@ class Tree:
                     and not is_keyboard_focusable(node)
                 ):
                     return False
+                # ブラウザ以外で、画像のコントロールだがキーボードフォーカス可能な場合は対象とする
                 elif (
                     not is_browser
                     and node.ControlTypeName == "ImageControl"
                     and is_keyboard_focusable(node)
                 ):
                     return True
+                # 一般的なインタラクティブ要素またはドキュメント要素の場合
                 elif (
                     node.ControlTypeName
                     in INTERACTIVE_CONTROL_TYPE_NAMES | DOCUMENT_CONTROL_TYPE_NAMES
@@ -277,6 +339,7 @@ class Tree:
                         and is_element_enabled(node)
                         and (not is_element_image(node) or is_keyboard_focusable(node))
                     )
+                # グループコントロールの場合
                 elif node.ControlTypeName == "GroupControl":
                     if is_browser:
                         return (
@@ -284,6 +347,7 @@ class Tree:
                             and is_element_enabled(node)
                             and (is_default_action(node) or is_keyboard_focusable(node))
                         )
+                    # ブラウザ以外のGroupControlの処理はコメントアウトされています
                     # else:
                     #     return is_element_visible and is_element_enabled(node) and is_default_action(node)
             except Exception:
@@ -291,16 +355,25 @@ class Tree:
             return False
 
         def dom_correction(node: Control):
+            """
+            ブラウザのDOM構造特有の冗長性や入れ子構造を補正するための関数です。
+            例えば、「リスト項目」の中に「リンク」がある場合など、重複して検出するのを防ぐために
+            親要素を削除し、より適切な子要素を採用するなどの調整を行います。
+            """
+            # "list item"の中に"link"がある、あるいは"item"の中に"link"がある場合
             if element_has_child_element(
                 node, "list item", "link"
             ) or element_has_child_element(node, "item", "link"):
-                dom_interactive_nodes.pop()
+                dom_interactive_nodes.pop()  # 直前に追加された親ノード（重複あるいは不要）を削除
                 return None
+            
+            # グループコントロールの場合の処理
             elif node.ControlTypeName == "GroupControl":
-                dom_interactive_nodes.pop()
+                dom_interactive_nodes.pop() # 親グループを削除
                 if is_keyboard_focusable(node):
                     child = node
                     try:
+                        # 適切なテキストを持つ子要素を探す探索ロジック
                         while child.GetFirstChildControl() is not None:
                             if child.ControlTypeName in INTERACTIVE_CONTROL_TYPE_NAMES:
                                 return None
@@ -309,6 +382,8 @@ class Tree:
                         return None
                     if child.ControlTypeName != "TextControl":
                         return None
+                    
+                    # 適切な子要素が見つかった場合、その情報でノードを再作成して追加
                     legacy_pattern = node.GetLegacyIAccessiblePattern()
                     value = legacy_pattern.Value
                     element_bounding_box = node.BoundingRectangle
@@ -332,6 +407,7 @@ class Tree:
                             }
                         )
                     )
+            # "link"の中に"heading"がある場合の処理
             elif element_has_child_element(node, "link", "heading"):
                 dom_interactive_nodes.pop()
                 node = node.GetFirstChildControl()
@@ -360,10 +436,20 @@ class Tree:
                     )
                 )
 
+        # --- ツリー走査のメインロジック ---
+
         def tree_traversal(
             node: Control, is_dom: bool = False, is_dialog: bool = False
         ):
-            # Checks to skip the nodes that are not interactive
+            """
+            再帰的にUIツリーを探索します。
+            
+            Args:
+                node: 現在探索中のコントロール
+                is_dom: 現在ブラウザのHTMLコンテンツ（DOM）内部にいるかどうか
+                is_dialog: ダイアログの中にいるかどうか
+            """
+            # インタラクティブでない不要なノードをスキップするチェック
             if (
                 node.IsOffscreen
                 and (
@@ -375,10 +461,11 @@ class Tree:
             ):
                 return None
 
+            # スクロール可能な要素であればリストに追加
             if is_element_scrollable(node):
                 scroll_pattern: ScrollPattern = node.GetPattern(PatternId.ScrollPattern)
                 box = node.BoundingRectangle
-                # Get the center
+                # 要素内のランダムな点を取得（操作点として使用）
                 x, y = random_point_within_bounding_box(node=node, scale_factor=0.8)
                 center = Center(x=x, y=y)
                 scrollable_nodes.append(
@@ -415,6 +502,7 @@ class Tree:
                     )
                 )
 
+            # インタラクティブな要素であればリストに追加
             if is_element_interactive(node):
                 legacy_pattern = node.GetLegacyIAccessiblePattern()
                 value = (
@@ -425,6 +513,8 @@ class Tree:
                 is_focused = node.HasKeyboardFocus
                 name = node.Name.strip()
                 element_bounding_box = node.BoundingRectangle
+                
+                # ブラウザDOM内の要素の場合
                 if is_browser and is_dom:
                     bounding_box = self.iou_bounding_box(
                         self.dom_bounding_box, element_bounding_box
@@ -444,8 +534,10 @@ class Tree:
                         }
                     )
                     dom_interactive_nodes.append(tree_node)
+                    # DOM構造の補正を実行
                     dom_correction(node=node)
                 else:
+                    # 通常のアプリ要素の場合
                     bounding_box = self.iou_bounding_box(
                         window_bounding_box, element_bounding_box
                     )
@@ -464,6 +556,7 @@ class Tree:
                         }
                     )
                     interactive_nodes.append(tree_node)
+            # テキスト要素の場合の処理（コメントアウト中）
             # elif is_element_text(node):
             #     informative_nodes.append(TextElementNode(
             #         name=node.Name.strip() or "''",
@@ -472,11 +565,12 @@ class Tree:
 
             children = node.GetChildren()
 
-            # Recursively traverse the tree the right to left for normal apps and for DOM traverse from left to right
+            # 子要素を再帰的に走査
+            # DOM内では左から右（通常の順序）、通常のアプリでは右から左（逆順）で探索
+            # 理由: UIの重ね合わせ順序やタブオーダーに関連している可能性があります
             for child in children if is_dom else children[::-1]:
-                # Incrementally building the xpath
-
-                # Check if the child is a DOM element
+                
+                # ブラウザのレンダリング領域（Chrome_RenderWidgetHostHWND）に入った場合
                 if is_browser and child.ClassName == "Chrome_RenderWidgetHostHWND":
                     bounding_box = child.BoundingRectangle
                     self.dom_bounding_box = BoundingBox(
@@ -487,28 +581,32 @@ class Tree:
                         width=bounding_box.width(),
                         height=bounding_box.height(),
                     )
-                    # enter DOM subtree
+                    # DOMサブツリーの走査を開始（is_dom=True）
                     tree_traversal(child, is_dom=True, is_dialog=is_dialog)
-                # Check if the child is a dialog
+                
+                # ダイアログウィンドウが見つかった場合
                 elif isinstance(child, WindowControl):
                     if not child.IsOffscreen:
                         if is_dom:
                             bounding_box = child.BoundingRectangle
+                            # ダイアログが画面の大半を覆っている場合、背後のDOM要素は無効とする
                             if bounding_box.width() > 0.8 * self.dom_bounding_box.width:
-                                # Because this window element covers the majority of the screen
                                 dom_interactive_nodes.clear()
                         else:
+                            # モーダルダイアログの場合、背後のアプリ要素は無効とする
                             if is_window_modal(child):
-                                # Because this window element is modal
                                 interactive_nodes.clear()
-                    # enter dialog subtree
+                    # ダイアログサブツリーの走査を開始（is_dialog=True）
                     tree_traversal(child, is_dom=is_dom, is_dialog=True)
                 else:
-                    # normal non-dialog children
+                    # 通常の子要素
                     tree_traversal(child, is_dom=is_dom, is_dialog=is_dialog)
 
+        # --- 初期化と実行 ---
         interactive_nodes, dom_interactive_nodes, scrollable_nodes = [], [], []
         app_name = node.Name.strip()
+        
+        # 特定のクラス名に対してアプリ名を読みやすく変更
         match node.ClassName:
             case "Progman":
                 app_name = "Desktop"
@@ -518,18 +616,27 @@ class Tree:
                 app_name = "Context Menu"
             case _:
                 pass
+        
+        # 走査開始
         tree_traversal(node, is_dom=False, is_dialog=False)
 
         logger.debug(f"Interactive nodes:{len(interactive_nodes)}")
         logger.debug(f"DOM interactive nodes:{len(dom_interactive_nodes)}")
         logger.debug(f"Scrollable nodes:{len(scrollable_nodes)}")
 
+        # 通常のインタラクティブノードとDOMインタラクティブノードを結合
         interactive_nodes.extend(dom_interactive_nodes)
         return (interactive_nodes, scrollable_nodes)
 
     def get_annotated_screenshot(
         self, nodes: list[TreeElementNode], scale: float = 1.0
     ) -> Image.Image:
+        
+        # ============================================================================
+        # スクリーンショットを取った後、パディングを加えて画像として返す
+        # ============================================================================
+
+        # スクリーンショットを取得
         screenshot = self.desktop.get_screenshot()
         sleep(0.10)
 
@@ -542,7 +649,7 @@ class Tree:
             (scaled_width, scaled_height), Image.Resampling.LANCZOS
         )
 
-        # Add padding
+        # パディングを加えたスクリーンショットの画像を作成
         padding = 5
         width = int(screenshot.width + (1.5 * padding))
         height = int(screenshot.height + (1.5 * padding))
@@ -570,21 +677,21 @@ class Tree:
                 int(box.right * scale) + padding,
                 int(box.bottom * scale) + padding,
             )
-            # Draw bounding box
+            # スクリーンの境界線を描画
             draw.rectangle(adjusted_box, outline=color, width=2)
 
-            # Label dimensions
+            # ラベルのサイズ
             label_width = draw.textlength(str(label), font=font)
             label_height = font_size
             left, top, right, bottom = adjusted_box
 
-            # Label position above bounding box
+            # ラベルの位置
             label_x1 = right - label_width
             label_y1 = top - label_height - 4
             label_x2 = label_x1 + label_width
             label_y2 = label_y1 + label_height + 4
 
-            # Draw label background and text
+            # ラベルの背景とテキストを描画
             draw.rectangle([(label_x1, label_y1), (label_x2, label_y2)], fill=color)
             draw.text(
                 (label_x1 + 2, label_y1 + 2),
@@ -593,7 +700,7 @@ class Tree:
                 font=font,
             )
 
-        # Draw annotations in parallel
+        # 並列でアノテーションを描画
         with ThreadPoolExecutor() as executor:
             executor.map(draw_annotation, range(len(nodes)), nodes)
         return padded_screenshot

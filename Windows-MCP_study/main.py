@@ -1,8 +1,8 @@
 from live_inspect.watch_cursor import WatchCursor
 from contextlib import asynccontextmanager
 from fastmcp.utilities.types import Image
-from src.desktop.service import Desktop
-from src.logging import get_logger, log_tool_call
+from windows_mcp.desktop.service import Desktop
+from windows_mcp.logging import get_logger, log_tool_call
 from mcp.types import ToolAnnotations
 from humancursor import SystemCursor
 from textwrap import dedent
