@@ -1,5 +1,3 @@
-# https://github.com/microsoft/agent-framework/blob/main/python/samples/getting_started/chat_client/azure_ai_chat_client.py
-
 import asyncio
 
 from agent_framework.azure import AzureOpenAIChatClient
